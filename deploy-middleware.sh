@@ -46,43 +46,13 @@ check_dependencies() {
 check_env_files() {
     log_info "检查环境变量文件..."
     
-    if [ ! -f ".env.infrastructure" ]; then
-        log_warn "创建 .env.infrastructure 文件..."
-        cat > .env.infrastructure << 'EOF'
-# 基础设施配置
-TZ=Asia/Shanghai
-REGISTRY=bellatop
-
-# MySQL配置
-MYSQL_ROOT_PASSWORD=root
-MYSQL_PORT=3306
-
-# Redis配置  
-REDIS_PASSWORD=bella123
-REDIS_PORT=6379
-
-# Kafka配置
-KAFKA_PLAINTEXT_PORT=9092
-KAFKA_CONTROLLER_PORT=9093
-KAFKA_EXTERNAL_PORT=19092
-KAFKA_EXTERNAL_HOST=localhost
-WORKFLOW_RUN_LOG_TOPIC=workflow_run_log
-FILE_API_TOPIC=bella_file_api
-
-# Elasticsearch配置
-ELASTICSEARCH_HTTP_PORT=9200
-ELASTICSEARCH_TRANSPORT_PORT=9300
-
-# MinIO配置
-MINIO_API_PORT=9000
-MINIO_CONSOLE_PORT=9001
-MINIO_ACCESS_KEY=bella_admin
-MINIO_SECRET_KEY=bella123456
-WORKFLOW_S3_BUCKET=bella-workflow
-FILE_API_S3_BUCKET=bella-file-api
-EOF
-        log_warn "请检查并编辑 .env.infrastructure 文件中的配置"
+    if [ ! -f ".env" ]; then
+        log_error ".env 文件不存在！"
+        log_error "请运行: cp .env.example .env 并编辑配置"
+        exit 1
     fi
+    
+    log_info "使用统一的 .env 配置文件"
 }
 
 # 准备初始化脚本
@@ -171,30 +141,24 @@ echo "=== MinIO Buckets Setup ==="
 sleep 20
 
 # 等待MinIO启动
-until curl -f http://localhost:9000/minio/health/live; do
+until curl -f http://minio:9000/minio/health/live; do
     echo "等待 MinIO 启动..."
     sleep 5
 done
 
-# 下载mc客户端
-if [ ! -f "/usr/local/bin/mc" ]; then
-    curl -o /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc
-    chmod +x /usr/local/bin/mc
-fi
-
-# 配置mc
-/usr/local/bin/mc alias set minio http://localhost:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
+# 配置mc (mc已经预装在minio/mc镜像中)
+mc alias set minio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
 
 # 创建buckets
 echo "创建 workflow bucket: ${WORKFLOW_S3_BUCKET}"
-/usr/local/bin/mc mb minio/${WORKFLOW_S3_BUCKET} || echo "Workflow bucket exists"
+mc mb minio/${WORKFLOW_S3_BUCKET} || echo "Workflow bucket exists"
 
 echo "创建 file-api bucket: ${FILE_API_S3_BUCKET}"  
-/usr/local/bin/mc mb minio/${FILE_API_S3_BUCKET} || echo "File-API bucket exists"
+mc mb minio/${FILE_API_S3_BUCKET} || echo "File-API bucket exists"
 
 # 设置策略
-/usr/local/bin/mc anonymous set public minio/${WORKFLOW_S3_BUCKET}
-/usr/local/bin/mc anonymous set public minio/${FILE_API_S3_BUCKET}
+mc anonymous set public minio/${WORKFLOW_S3_BUCKET}
+mc anonymous set public minio/${FILE_API_S3_BUCKET}
 
 echo "MinIO setup completed!"
 EOF
@@ -268,7 +232,7 @@ deploy_infrastructure() {
     docker network create bella-network 2>/dev/null || log_warn "网络已存在"
     
     # 启动服务
-    docker-compose --env-file .env.infrastructure -f docker-compose.infrastructure.yml up -d
+    docker-compose --env-file .env -f docker-compose.infrastructure.yml up -d
     
     log_info "等待基础设施初始化完成（约3-5分钟）..."
     sleep 300
