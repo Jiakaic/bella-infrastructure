@@ -1,0 +1,67 @@
+# 子项目目录 (有自己的 git 仓库)
+bella-file-api/
+
+# 环境变量配置文件 (包含敏感信息)
+.env
+.env.local
+.env.production
+.env.workflow  
+.env.file-api
+.env.infrastructure
+
+# 运行时数据和日志
+*/api/logs/
+*/api/cache/
+*/api/configuration/
+*/api/privdata/
+*/logs/
+*/cache/
+infrastructure/workflow-logs/
+
+# Docker 运行时文件
+volumes/*/logs/
+volumes/*/cache/
+volumes/*/data/
+
+# IDE 配置
+.idea/
+.vscode/
+*.iml
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Java
+target/
+*.jar
+*.war
+*.ear
+*.class
+
+# Maven
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+
+# Gradle
+.gradle/
+build/
+
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.bak
+
+workflow
+file-api
+bella-file-api

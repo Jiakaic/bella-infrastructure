@@ -1,0 +1,154 @@
+name: bella-infrastructure
+version: "3.8"
+
+networks:
+  bella-network:
+    driver: bridge
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: bella-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./infrastructure/mysql/init:/docker-entrypoint-initdb.d:ro
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - bella-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: bella-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass bella123
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "bella123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bella-network
+
+  # 关键：添加Elasticsearch（workflow需要）
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.7
+    container_name: bella-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - ingest.geoip.downloader.enabled=false
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+      - ./infrastructure/elasticsearch/scripts:/scripts:ro
+      - ./infrastructure/elasticsearch/config:/usr/share/elasticsearch/config/templates:ro
+    networks:
+      - bella-network
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "mkdir -p /usr/share/elasticsearch/data &&
+       chown -R elasticsearch:elasticsearch /usr/share/elasticsearch/data &&
+       /usr/local/bin/docker-entrypoint.sh eswrapper &
+       ES_PID=$$! &&
+       sleep 60 &&
+       /scripts/init-elasticsearch.sh &&
+       wait $$ES_PID"
+
+  kafka:
+    image: docker.io/bitnamilegacy/kafka:3.4.1
+    container_name: bella-kafka
+    user: "1001:0"
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+      - "19092:19092"
+    environment:
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      KAFKA_CLUSTER_ID: 'BellaUnified001'
+      KAFKA_CFG_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      ALLOW_PLAINTEXT_LISTENER: 'yes'
+      # 环境变量传递给脚本
+      WORKFLOW_RUN_LOG_TOPIC: workflow_run_log
+      FILE_API_TOPIC: bella_file_api
+    volumes:
+      - kafka-data:/bitnami/kafka
+      - ./infrastructure/kafka/scripts:/scripts:ro
+      - ./infrastructure/workflow-logs:/workflow-logs  # 关键：workflow日志收集
+    networks:
+      - bella-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:9092 --list | grep -E '(workflow_run_log|bella_file_api)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    command: bash -c "/opt/bitnami/scripts/kafka/entrypoint.sh /opt/bitnami/scripts/kafka/run.sh & sleep 30 && /scripts/setup-topics.sh"
+
+  minio:
+    image: minio/minio:latest
+    container_name: bella-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=bella_admin
+      - MINIO_ROOT_PASSWORD=bella123456
+      - WORKFLOW_S3_BUCKET=bella-workflow
+      - FILE_API_S3_BUCKET=bella-file-api
+    volumes:
+      - minio-data:/data
+      - ./infrastructure/minio/scripts:/scripts:ro
+    networks:
+      - bella-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    entrypoint: ["/bin/sh"]
+    command: -c "minio server /data --console-address ':9001' & sleep 20 && /scripts/init-buckets.sh"
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:
+  minio-data:
+  elasticsearch-data:

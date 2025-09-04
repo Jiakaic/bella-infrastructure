@@ -1,0 +1,161 @@
+name: bella-workflow
+version: "3.8"
+
+networks:
+  bella-network:
+    name: bella-infrastructure_bella-network
+    external: true
+
+services:
+  # Code Sandbox (workflow独有)
+  code-sandbox:
+    image: docker.linkos.org/langgenius/dify-sandbox:0.2.10
+    container_name: bella-workflow-code-sandbox
+    ports:
+      - "${CODE_SANDBOX_PORT:-8090}:8090"
+    environment:
+      - API_KEY=${CODE_SANDBOX_API_KEY:-bella-workflow-sandbox}
+      - GIN_MODE=${CODE_SANDBOX_GIN_MODE:-release}
+      - WORKER_TIMEOUT=${CODE_SANDBOX_WORKER_TIMEOUT:-15}
+      - ENABLE_NETWORK=${CODE_SANDBOX_ENABLE_NETWORK:-true}
+      - SANDBOX_PORT=8090
+      - TZ=${TZ:-UTC}
+    privileged: true
+    stop_grace_period: 1s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - bella-network
+
+  # Workflow Tasks (Flink处理任务)
+  bella-workflow-tasks:
+    image: ${REGISTRY:-bellatop}/bella-workflow-tasks:latest
+    build:
+      context: ./bella-workflow
+      dockerfile: tasks/Dockerfile
+      args:
+        MAVEN_ARGS: -Dmaven.test.skip=true -U -Dmaven.build.cache.enabled=false
+    container_name: bella-workflow-tasks
+    depends_on:
+      - code-sandbox
+    volumes:
+      - ./workflow/flink/application.properties:/opt/flink/conf/application.properties:ro
+    environment:
+      - CONFIG_FILE=/opt/flink/conf/application.properties
+      # Kafka配置
+      - KAFKA_BOOTSTRAP_SERVERS=bella-kafka:9092
+      # Elasticsearch配置
+      - ELASTICSEARCH_HOSTS=bella-elasticsearch:9200
+    networks:
+      - bella-network
+
+  # Workflow API
+  bella-workflow-api:
+    #    image: ${REGISTRY:-bellatop}/bella-workflow-api:latest
+    build:
+      context: ./bella-workflow
+      dockerfile: api/Dockerfile
+      args:
+        - MAVEN_ARGS="-Dmaven.test.skip=true -U -Dmaven.build.cache.enabled=false"
+    container_name: bella-workflow-api
+    ports:
+      # 仅暴露调试端口，HTTP通过共享nginx访问
+      - "${DEBUGPORT:-9008}:9008"
+    expose:
+      - "8080"  # 内部端口供nginx访问
+    environment:
+      # 日志配置
+      - LOG_PATH=${LOG_PATH:-/opt/bella-workflow/applogs}
+      # 数据库配置
+      - MYSQL_HOST=bella-mysql
+      - MYSQL_DATABASE=${WORKFLOW_MYSQL_DATABASE:-bella_workflow}
+      - MYSQL_USER=${WORKFLOW_MYSQL_USER:-bella_workflow}
+      - MYSQL_PASSWORD=${WORKFLOW_MYSQL_PASSWORD:-bella123}
+      # Redis配置
+      - SPRING_REDIS_HOST=bella-redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_REDIS_PASSWORD=${REDIS_PASSWORD:-bella123}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-bella123}
+      - REDIS_HOST=bella-redis
+      # Elasticsearch配置
+      - ELASTICSEARCH_HOSTS=bella-elasticsearch:9200
+      - ELASTICSEARCH_RUN_LOG_INDEX=${ELASTICSEARCH_RUN_LOG_INDEX:-workflow_run_log_test}
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
+      # S3配置
+      - S3_HOST=bella-minio
+      - S3_API_PORT=9000
+      - S3_ACCESS_KEY=${WORKFLOW_S3_ACCESS_KEY:-bella_admin}
+      - S3_SECRET_KEY=${WORKFLOW_S3_SECRET_KEY:-bella123456}
+      - S3_BUCKET=${WORKFLOW_S3_BUCKET:-bella-workflow}
+      - S3_ROOT_PATH=${WORKFLOW_S3_ROOT_PATH:-test-states}
+      # 代码沙箱配置
+      - BELLA_CODE_SANDBOX_API_BASE=http://code-sandbox:8090
+      - BELLA_MAX_EX_MEMORY_ALLOC=${BELLA_MAX_EX_MEMORY_ALLOC:-209715200}
+      # Bella API配置
+      - BELLA_TOOL_API_ENABLED=${BELLA_TOOL_API_ENABLED:-false}
+      - BELLA_DATASET_API_ENABLED=${BELLA_DATASET_API_ENABLED:-false}
+      - BELLA_TOOL_API_BASE=${BELLA_TOOL_API_BASE:-http://localhost}
+      - BELLA_DATASET_API_BASE=${BELLA_DATASET_API_BASE:-http://localhost}
+      - BELLA_WORKFLOW_BACKEND_OUTER_URL=${BELLA_WORKFLOW_BACKEND_OUTER_URL:-http://localhost:8080}
+      # 应用配置
+      - BELLA_WORKFLOW_DOMAIN=${BELLA_WORKFLOW_BACKEND_OUTER_URL:-http://localhost:8080}
+      - BELLA_WORKFLOW_HOSTS=localhost:8080
+      - BELLA_OPENAPI_HOST=${BELLA_OPENAPI_URL:-https://openapi.example.com}
+      - BELLA_OPENAPI_BASE=${BELLA_OPENAPI_BASE:-https://openapi.example.com/v1/}
+      - BELLA_OPENAPI_URL=${BELLA_OPENAPI_URL:-https://openapi.example.com}
+      - BELLA_LOGIN_TYPE=${BELLA_LOGIN_TYPE:-client}
+      - BELLA_LOGIN_PAGE_URL=${BELLA_LOGIN_PAGE_URL:-${BELLA_OPENAPI_URL}/login}
+      - BELLA_SESSION_COOKIE_NAME=${BELLA_SESSION_COOKIE_NAME:-bella_openapi_sessionId}
+      - BELLA_SESSION_COOKIE_DOMAIN=${BELLA_SESSION_COOKIE_DOMAIN:-example.com}
+      - BELLA_WORKFLOW_RUN_LOG_PROVIDER=${BELLA_WORKFLOW_RUN_LOG_PROVIDER:-elasticsearch}
+      - API_PORT=${WORKFLOW_API_PORT:-8080}
+      # 环境变量
+      - IDC=zeus
+      - MODULE=bella-workflow
+      - ENVTYPE=test
+      - DEBUGPORT=9008
+      - JMXPORT=9009
+      - MATRIX_CODE_DIR=/opt/bella-workflow/htdocs
+      - MATRIX_APPLOGS_DIR=/opt/bella-workflow/applogs
+      - MATRIX_ACCESSLOGS_DIR=/opt/bella-workflow/logs
+      - MATRIX_LOGS_DIR=/opt/bella-workflow/logs
+      - MATRIX_CACHE_DIR=/opt/bella-workflow/cache
+      - MATRIX_PRIVDATA_DIR=/opt/bella-workflow/privdata
+    volumes:
+      # 挂载日志和配置目录
+      - ./workflow/api/logs:/opt/bella-workflow/applogs
+      - ./workflow/api/configuration:/opt/bella-workflow/configuration
+      - ./workflow/api/cache:/opt/bella-workflow/cache
+      - ./workflow/api/privdata:/opt/bella-workflow/privdata
+      # 重要：挂载日志到kafka监听目录
+      - ./infrastructure/workflow-logs:/workflow-logs
+    depends_on:
+      - code-sandbox
+      - bella-workflow-tasks
+    networks:
+      - bella-network
+
+  # Workflow Web 前端服务
+  bella-workflow-web:
+#    image: ${REGISTRY:-bellatop}/bella-workflow-web:latest
+    build:
+      context: ./bella-workflow
+      dockerfile: web/Dockerfile
+    container_name: bella-workflow-web
+    expose:
+      - "3000"  # 内部端口供nginx访问
+    environment:
+      # 通过共享nginx访问API
+      - NEXT_PUBLIC_API_PREFIX=${PROTOCOL:-https}://${WORKFLOW_DOMAIN:-workflow.example.com}/console/api
+      - NEXT_PUBLIC_PUBLIC_API_PREFIX=${PROTOCOL:-https}://${WORKFLOW_DOMAIN:-workflow.example.com}/api
+      - CONSOLE_API_URL=${PROTOCOL:-https}://${WORKFLOW_DOMAIN:-workflow.example.com}
+      - APP_API_URL=${PROTOCOL:-https}://${WORKFLOW_DOMAIN:-workflow.example.com}
+      - PORT=3000
+      - TZ=${TZ:-UTC}
+    networks:
+      - bella-network
