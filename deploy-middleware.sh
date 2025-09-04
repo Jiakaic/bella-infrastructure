@@ -69,7 +69,14 @@ prepare_init_scripts() {
     ./prepare-mysql-init.sh
     
     # 创建其他必要目录和脚本
-    mkdir -p infrastructure/{kafka/scripts,minio/scripts,elasticsearch/scripts,workflow-logs}
+    mkdir -p infrastructure/{kafka/scripts,minio/scripts,elasticsearch/scripts}
+    
+    # 确保bella-workflow日志目录存在
+    mkdir -p ../bella-workflow/api/logs
+    touch ../bella-workflow/api/logs/workflow-run.log
+    chmod 666 ../bella-workflow/api/logs/workflow-run.log
+    
+    log_info "日志文件路径: $(pwd)/../bella-workflow/api/logs/workflow-run.log"
     
     # Kafka setup脚本
     cat > infrastructure/kafka/scripts/setup-topics.sh << 'EOF'
@@ -89,41 +96,40 @@ sleep 30
 /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --replication-factor 1 --partitions 1 --topic ${WORKFLOW_RUN_LOG_TOPIC:-workflow_run_log}
 /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --replication-factor 1 --partitions 3 --topic ${FILE_API_TOPIC:-bella_file_api}
 
-# 设置Workflow日志收集
-if [ -d "/workflow-logs" ]; then
-    touch /workflow-logs/workflow-run.log
-    chmod 666 /workflow-logs/workflow-run.log
-    
-    mkdir -p /tmp/kafka-connect-logs
-    chmod 777 /tmp/kafka-connect-logs
+# 设置Workflow日志收集 - 使用tail方式实时采集
+mkdir -p /tmp/kafka-logs
+chmod 777 /tmp/kafka-logs
 
-    # Kafka Connect配置
-    cat > /opt/bitnami/kafka/config/connect-standalone.properties << 'CONNECT_EOF'
-bootstrap.servers=kafka:9092
-key.converter=org.apache.kafka.connect.storage.StringConverter
-value.converter=org.apache.kafka.connect.storage.StringConverter
-key.converter.schemas.enable=false
-value.converter.schemas.enable=false
-offset.storage.file.filename=/tmp/kafka-connect-logs/connect.offsets
-offset.flush.interval.ms=10000
-plugin.path=/opt/bitnami/kafka/libs
-CONNECT_EOF
+# 创建日志采集脚本
+cat > /opt/bitnami/kafka/bin/log-collector.sh << 'LOG_EOF'
+#!/bin/bash
 
-    cat > /opt/bitnami/kafka/config/connect-file-source.properties << 'CONNECT_EOF'
-name=workflow-log-connector
-connector.class=org.apache.kafka.connect.file.FileStreamSourceConnector
-tasks.max=1
-file=/workflow-logs/workflow-run.log
-topic=${WORKFLOW_RUN_LOG_TOPIC:-workflow_run_log}
-key.converter=org.apache.kafka.connect.storage.StringConverter
-value.converter=org.apache.kafka.connect.storage.StringConverter
-key.converter.schemas.enable=false
-value.converter.schemas.enable=false
-CONNECT_EOF
+LOG_FILE="/bella-workflow/api/logs/workflow-run.log"
+TOPIC="${WORKFLOW_RUN_LOG_TOPIC:-workflow_run_log}"
 
-    # 启动Kafka Connect
-    nohup /opt/bitnami/kafka/bin/connect-standalone.sh /opt/bitnami/kafka/config/connect-standalone.properties /opt/bitnami/kafka/config/connect-file-source.properties > /tmp/kafka-connect-logs/kafka-connect.log 2>&1 &
+echo "Starting log collector for: $LOG_FILE -> $TOPIC"
+
+# 检查日志文件是否存在
+if [ ! -f "$LOG_FILE" ]; then
+    echo "Warning: Log file $LOG_FILE not found, creating it..."
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE"
 fi
+
+# 使用tail -f实时监控日志文件，发送到Kafka
+tail -F "$LOG_FILE" 2>/dev/null | while IFS= read -r line; do
+    if [ ! -z "$line" ]; then
+        echo "$line" | /opt/bitnami/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic "$TOPIC" >/dev/null 2>&1
+    fi
+done
+LOG_EOF
+
+chmod +x /opt/bitnami/kafka/bin/log-collector.sh
+
+# 启动日志采集器
+nohup /opt/bitnami/kafka/bin/log-collector.sh > /tmp/kafka-logs/collector.log 2>&1 &
 
 # 列出topics
 echo "Created topics:"
@@ -205,8 +211,8 @@ EOF
     chmod +x infrastructure/minio/scripts/init-buckets.sh  
     chmod +x infrastructure/elasticsearch/scripts/init-elasticsearch.sh
     
-    # 设置workflow-logs目录权限
-    chmod 777 infrastructure/workflow-logs
+    # 设置bella-workflow日志目录权限
+    chmod 777 ../bella-workflow/api/logs
     
     log_info "初始化脚本准备完成"
 }
@@ -221,6 +227,7 @@ create_docker_compose() {
     if [ ! -f "docker-compose.infrastructure.yml" ]; then
         log_warn "docker-compose.infrastructure.yml 文件不存在"
         log_warn "请手动创建该文件，参考中间件部署指南"
+        log_warn "注意：Kafka服务需要添加volume映射: ../bella-workflow/api/logs:/bella-workflow/api/logs"
     fi
 }
 
@@ -236,6 +243,39 @@ deploy_infrastructure() {
     
     log_info "等待基础设施初始化完成（约3-5分钟）..."
     sleep 300
+    
+    # 验证日志文件映射
+    verify_log_file_mapping
+}
+
+# 验证日志文件映射
+verify_log_file_mapping() {
+    log_info "验证日志文件映射..."
+    
+    # 检查宿主机日志文件是否存在
+    if [ ! -f "../bella-workflow/api/logs/workflow-run.log" ]; then
+        log_error "宿主机日志文件不存在: ../bella-workflow/api/logs/workflow-run.log"
+        return 1
+    fi
+    
+    # 检查Kafka容器内是否能访问日志文件
+    if docker exec bella-kafka test -f /bella-workflow/api/logs/workflow-run.log; then
+        log_info "Kafka容器可以访问日志文件"
+        
+        # 测试写入权限
+        if docker exec bella-kafka sh -c "echo 'test log entry' >> /bella-workflow/api/logs/workflow-run.log"; then
+            log_info "日志文件写入权限正常"
+        else
+            log_error "日志文件写入权限异常"
+            return 1
+        fi
+    else
+        log_error "Kafka容器无法访问日志文件，请检查Docker Compose volume映射"
+        log_error "需要添加: ../bella-workflow/api/logs:/bella-workflow/api/logs"
+        return 1
+    fi
+    
+    log_info "日志文件映射验证通过"
 }
 
 # 验证部署
@@ -276,6 +316,14 @@ verify_deployment() {
     local topic_count=$(docker exec bella-kafka kafka-topics.sh --bootstrap-server localhost:9092 --list 2>/dev/null | grep -c -E "(workflow_run_log|bella_file_api)")
     if [ "$topic_count" -lt 2 ]; then
         log_error "Kafka topics创建不完整"
+        all_good=false
+    fi
+    
+    # 检查日志采集器
+    if docker exec bella-kafka pgrep -f "log-collector.sh" > /dev/null; then
+        log_info "日志采集器运行正常"
+    else
+        log_error "日志采集器未运行"
         all_good=false
     fi
     
