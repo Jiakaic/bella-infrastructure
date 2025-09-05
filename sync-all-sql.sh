@@ -102,7 +102,8 @@ check_overall_mysql_status() {
         return 1
     fi
     
-    if ! docker exec "$mysql_container" mysql -u"$mysql_user" -p"$mysql_pass" -e "SELECT 1;" &> /dev/null; then
+    # 测试连接（忽略密码警告）
+    if ! docker exec "$mysql_container" mysql -u"$mysql_user" -p"$mysql_pass" -e "SELECT 1;" >/dev/null 2>&1; then
         log_warning "无法通过Docker连接到MySQL数据库"
         return 1
     fi
