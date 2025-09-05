@@ -7,8 +7,8 @@ set -e
 echo "=== 准备MySQL初始化脚本 ==="
 
 # 检查源文件是否存在
-WORKFLOW_SQL_DIR="bella-workflow/api/sql"
-FILE_API_SQL_DIR="bella-file-api/api/sql"
+WORKFLOW_SQL_DIR="../bella-workflow/api/sql"
+FILE_API_SQL_DIR="../bella-file-api/api/sql"
 
 if [ ! -f "$WORKFLOW_SQL_DIR/init.sql" ]; then
     echo "错误: 找不到 $WORKFLOW_SQL_DIR/init.sql"

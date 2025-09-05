@@ -137,32 +137,8 @@ services:
       - ./infrastructure/minio/scripts:/scripts:ro
     networks:
       - bella-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    command: server /data --console-address ':9001'
-
-  minio-setup:
-    image: minio/mc:latest
-    container_name: bella-minio-setup
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      - MINIO_ROOT_USER=bella_admin
-      - MINIO_ROOT_PASSWORD=bella123456
-      - WORKFLOW_S3_BUCKET=bella-workflow
-      - FILE_API_S3_BUCKET=bella-file-api
-    volumes:
-      - ./infrastructure/minio/scripts:/scripts:ro
-    networks:
-      - bella-network
-    entrypoint: ["/bin/sh"]
-    command: -c "/scripts/init-buckets.sh"
-    restart: "no"
+    entrypoint: ["/bin/bash"]
+    command: ["/scripts/init-minio.sh"]
 
 volumes:
   mysql-data:

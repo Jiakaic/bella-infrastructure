@@ -293,7 +293,7 @@ ALTER TABLE `workflow_aggregate`
     ADD COLUMN default_publish_version BIGINT NOT NULL DEFAULT -1  comment '默认生效版本号 -1 使用最新 ' AFTER `latest_publish_version`;
 
 -- update.20241016.sql
-alter table workflow_node_run modify column notify_data longtext;
+alter table workflow_node_run modify column notify_data longtext
 
 -- update.20241102.sql
 alter table `workflow_aggregate`
@@ -405,7 +405,7 @@ CREATE TABLE `workflow_template`
     PRIMARY KEY (`id`),
     UNIQUE KEY `idx_tenant_id_space_code_template_id` (`tenant_id`, `space_code`, `template_id`) USING BTREE
 ) ENGINE = InnoDB
-  AUTO_INCREMENT = 1;
+  AUTO_INCREMENT = 1
 
 -- update.20250102.sql
 alter table `workflow_kafka_trigger` add column `expression_type` varchar(16) not null default '' comment '表达式脚本语言类型' after `expression`;
