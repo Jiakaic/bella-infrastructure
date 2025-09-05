@@ -10,7 +10,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # 配置
-SOURCE_DIR="../bella-file-api/api/sql"
+SOURCE_DIR="../bella-knowledge/api/sql"
 DEST_DIR="./infrastructure/mysql/init"
 MYSQL_HOST="${MYSQL_HOST:-localhost}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
@@ -329,7 +329,7 @@ done
 
 # 主函数
 main() {
-    log_info "开始同步bella-file-api的SQL文件..."
+    log_info "开始同步bella-knowledge的SQL文件..."
     
     check_source_dir
     create_dest_dir

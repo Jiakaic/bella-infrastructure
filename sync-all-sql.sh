@@ -25,7 +25,7 @@ show_help() {
     echo ""
     echo "选项:"
     echo "  -h, --help          显示此帮助信息"
-    echo "  --file-api-only     仅同步bella-file-api的SQL文件"
+    echo "  --file-api-only     仅同步bella-knowledge的SQL文件"
     echo "  --workflow-only     仅同步bella-workflow的SQL文件"
     echo "  --mysql-host HOST   MySQL主机地址 (默认: localhost)"
     echo "  --mysql-port PORT   MySQL端口 (默认: 3306)"
@@ -37,7 +37,7 @@ show_help() {
     echo ""
     echo "说明:"
     echo "  此脚本会调用以下子脚本:"
-    echo "  - sync-sql-files.sh     (bella-file-api SQL文件)"
+    echo "  - sync-sql-files.sh     (bella-knowledge SQL文件)"
     echo "  - sync-workflow-sql.sh  (bella-workflow SQL文件)"
     echo ""
     echo "  脚本会自动:"
@@ -156,10 +156,10 @@ main() {
     local success_count=0
     local total_count=0
     
-    # 执行bella-file-api脚本
+    # 执行bella-knowledge脚本
     if [ "$workflow_only" = false ]; then
         ((total_count++))
-        if run_subscript "sync-sql-files.sh" "bella-file-api SQL文件同步"; then
+        if run_subscript "sync-sql-files.sh" "bella-knowledge SQL文件同步"; then
             ((success_count++))
         fi
     fi
