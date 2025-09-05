@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -15,7 +13,7 @@ DEST_DIR="./infrastructure/mysql/init"
 MYSQL_HOST="${MYSQL_HOST:-localhost}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
 MYSQL_USER="${MYSQL_USER:-root}"
-MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"
+MYSQL_PASSWORD="${MYSQL_PASSWORD:-root}"
 MYSQL_DB="${MYSQL_DB:-bella_workflow}"
 MYSQL_CONTAINER="${MYSQL_CONTAINER:-bella-mysql}"
 
@@ -350,23 +348,25 @@ main() {
     create_dest_dir
     copy_and_fix_sql_files
     
-    # 尝试Docker连接，失败时回退到直连
+    # 强制使用Docker连接
     if check_docker_mysql_connection; then
         create_database_docker
         execute_sql_files_docker
         verify_database_docker
-    elif check_mysql_connection; then
-        create_database
-        execute_sql_files
-        verify_database
+        log_success "bella-workflow同步完成！"
     else
-        log_info "SQL文件已准备完成，但跳过了数据库操作"
-        log_info "您可以手动执行以下命令来导入SQL："
+        log_error "Docker MySQL连接失败，请确保："
+        log_error "1. Docker已安装并运行"
+        log_error "2. MySQL容器 '$MYSQL_CONTAINER' 正在运行"
+        log_error "3. 容器密码正确 (当前: $MYSQL_USER/$MYSQL_PASSWORD)"
+        log_info ""
+        log_info "启动MySQL容器："
+        log_info "  docker-compose -f docker-compose.infrastructure.yml up -d mysql"
+        log_info ""
+        log_info "或手动执行SQL文件："
         log_info "  docker exec -i $MYSQL_CONTAINER mysql -u$MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DB < \$sql_file"
-        log_info "  或者: mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER $MYSQL_DB < \$sql_file"
+        exit 1
     fi
-    
-    log_success "bella-workflow同步完成！"
 }
 
 # 执行主函数

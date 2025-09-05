@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,9 +40,12 @@ show_help() {
     echo ""
     echo "  脚本会自动:"
     echo "  1. 拷贝并修复两个项目的SQL文件"
-    echo "  2. 创建对应的MySQL数据库 (bella_file_api, bella_workflow)"
-    echo "  3. 执行所有SQL文件"
+    echo "  2. 通过Docker容器创建对应的MySQL数据库 (bella_file_api, bella_workflow)"
+    echo "  3. 在Docker容器内执行所有SQL文件"
     echo "  4. 验证数据库和表的创建结果"
+    echo ""
+    echo "  注意: 此脚本仅支持Docker方式，请确保MySQL容器正在运行:"
+    echo "    docker-compose -f docker-compose.infrastructure.yml up -d mysql"
 }
 
 # 执行子脚本
@@ -83,40 +84,44 @@ run_subscript() {
     echo
 }
 
-# 检查MySQL连接状态
+# 检查MySQL连接状态（仅使用Docker）
 check_overall_mysql_status() {
     log_info "检查MySQL总体状态..."
     
-    if ! command -v mysql &> /dev/null; then
-        log_warning "MySQL客户端未安装"
+    local mysql_container="${MYSQL_CONTAINER:-bella-mysql}"
+    local mysql_user="${MYSQL_USER:-root}"
+    local mysql_pass="${MYSQL_PASSWORD:-root}"
+    
+    if ! command -v docker &> /dev/null; then
+        log_warning "Docker未安装"
         return 1
     fi
     
-    local mysql_cmd="mysql -h${MYSQL_HOST:-localhost} -P${MYSQL_PORT:-3306} -u${MYSQL_USER:-root}"
-    if [ -n "$MYSQL_PASSWORD" ]; then
-        mysql_cmd="$mysql_cmd -p$MYSQL_PASSWORD"
+    if ! docker ps | grep -q "$mysql_container"; then
+        log_warning "MySQL容器 $mysql_container 未运行"
+        return 1
     fi
     
-    if ! echo "SELECT 1;" | $mysql_cmd &> /dev/null; then
-        log_warning "无法连接到MySQL数据库"
+    if ! docker exec "$mysql_container" mysql -u"$mysql_user" -p"$mysql_pass" -e "SELECT 1;" &> /dev/null; then
+        log_warning "无法通过Docker连接到MySQL数据库"
         return 1
     fi
     
     # 检查两个数据库是否存在
-    local file_api_exists=$(echo "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'bella_file_api';" | $mysql_cmd | grep -c "bella_file_api" || true)
-    local workflow_exists=$(echo "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'bella_workflow';" | $mysql_cmd | grep -c "bella_workflow" || true)
+    local file_api_exists=$(docker exec "$mysql_container" mysql -u"$mysql_user" -p"$mysql_pass" -e "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'bella_file_api';" 2>/dev/null | grep -c "bella_file_api" || true)
+    local workflow_exists=$(docker exec "$mysql_container" mysql -u"$mysql_user" -p"$mysql_pass" -e "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'bella_workflow';" 2>/dev/null | grep -c "bella_workflow" || true)
     
     log_success "MySQL连接正常"
     
     if [ "$file_api_exists" -gt 0 ]; then
-        local file_api_tables=$(echo "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'bella_file_api';" | $mysql_cmd bella_file_api | tail -n 1)
+        local file_api_tables=$(docker exec "$mysql_container" mysql -u"$mysql_user" -p"$mysql_pass" bella_file_api -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'bella_file_api';" 2>/dev/null | tail -n 1)
         log_success "bella_file_api 数据库: ✓ ($file_api_tables 个表)"
     else
         log_warning "bella_file_api 数据库: ✗"
     fi
     
     if [ "$workflow_exists" -gt 0 ]; then
-        local workflow_tables=$(echo "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'bella_workflow';" | $mysql_cmd bella_workflow | tail -n 1)
+        local workflow_tables=$(docker exec "$mysql_container" mysql -u"$mysql_user" -p"$mysql_pass" bella_workflow -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'bella_workflow';" 2>/dev/null | tail -n 1)
         log_success "bella_workflow 数据库: ✓ ($workflow_tables 个表)"
     else
         log_warning "bella_workflow 数据库: ✗"
@@ -151,7 +156,8 @@ main() {
     export MYSQL_HOST="${MYSQL_HOST:-localhost}"
     export MYSQL_PORT="${MYSQL_PORT:-3306}"
     export MYSQL_USER="${MYSQL_USER:-root}"
-    export MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"
+    export MYSQL_PASSWORD="${MYSQL_PASSWORD:-root}"
+    export MYSQL_CONTAINER="${MYSQL_CONTAINER:-bella-mysql}"
     
     local success_count=0
     local total_count=0
