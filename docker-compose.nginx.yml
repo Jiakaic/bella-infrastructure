@@ -1,0 +1,26 @@
+version: "3.8"
+
+networks:
+  bella-infrastructure_bella-network:
+    external: true
+
+services:
+  nginx:
+    image: nginx:1.24-alpine
+    container_name: bella-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # 挂载nginx配置文件
+      - ./nginx-sites.conf:/etc/nginx/conf.d/default.conf:ro
+      # 挂载SSL证书
+      - ./shared-nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - bella-infrastructure_bella-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

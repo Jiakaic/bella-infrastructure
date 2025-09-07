@@ -1,5 +1,5 @@
 # 子项目目录 (有自己的 git 仓库)
-bella-file-api/
+bella-knowledge/
 
 # 环境变量配置文件 (包含敏感信息)
 .env
@@ -64,4 +64,4 @@ build/
 
 workflow
 file-api
-bella-file-api
+bella-knowledge

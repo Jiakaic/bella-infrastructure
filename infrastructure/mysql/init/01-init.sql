@@ -1,4 +1,6 @@
-USE bella_file_api;
+-- Auto-generated database selection
+USE `bella_file_api`;
+
 -- ----------------------------
 -- Table structure for file
 -- ----------------------------
