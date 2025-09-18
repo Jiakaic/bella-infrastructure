@@ -9,6 +9,7 @@ services:
   mysql:
     image: mysql:8.0
     container_name: bella-mysql
+    restart: unless-stopped
     ports:
       - "3306:3306"
     environment:
@@ -18,11 +19,11 @@ services:
       - ./infrastructure/mysql/init:/docker-entrypoint-initdb.d:ro
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     networks:
       - bella-network
 
@@ -35,14 +36,13 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "bella123", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "bella123", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 10
     networks:
       - bella-network
 
-  # 关键：添加Elasticsearch（workflow需要）
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.7
     container_name: bella-elasticsearch
@@ -67,13 +67,13 @@ services:
     networks:
       - bella-network
     healthcheck:
-      test: ["CMD", "curl", "-s", "-f", "http://localhost:9200/_cluster/health"]
+      test: [ "CMD", "curl", "-s", "-f", "http://localhost:9200/_cluster/health" ]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
-    entrypoint: ["/bin/bash", "-c"]
-    command: ["chown -R elasticsearch:elasticsearch /usr/share/elasticsearch/data && /usr/local/bin/docker-entrypoint.sh eswrapper & sleep 15 && /scripts/copy-and-init.sh"]
+    entrypoint: [ "/bin/bash", "-c" ]
+    command: [ "chown -R elasticsearch:elasticsearch /usr/share/elasticsearch/data && /usr/local/bin/docker-entrypoint.sh eswrapper & sleep 15 && /scripts/copy-and-init.sh" ]
 
   kafka:
     image: docker.io/bitnamilegacy/kafka:3.4.1
@@ -89,7 +89,7 @@ services:
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
       KAFKA_CLUSTER_ID: 'BellaUnified001'
       KAFKA_CFG_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19092
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://74.48.194.220:19092
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -99,18 +99,20 @@ services:
       KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: 'true'
       ALLOW_PLAINTEXT_LISTENER: 'yes'
-      # 环境变量传递给脚本
+      # Environment variables for scripts
       WORKFLOW_RUN_LOG_TOPIC: workflow_run_log
       FILE_API_TOPIC: bella_file_api
     volumes:
       - kafka-data:/bitnami/kafka
       - ./infrastructure/kafka/scripts:/scripts:ro
-      - ../bella-workflow/api/logs:/workflow-logs  # 关键：监听bella-workflow日志目录
-      - ../bella-workflow/docker/volumes/kafka/scripts:/bella-workflow-scripts:ro  # 读取原始脚本
+      # Key: Monitor bella-workflow log directory
+      - ../bella-workflow/api/logs:/workflow-logs
+      # Read original scripts
+      - ../bella-workflow/docker/volumes/kafka/scripts:/bella-workflow-scripts:ro
     networks:
       - bella-network
     healthcheck:
-      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:9092 --list | grep -E '(workflow_run_log|bella_file_api)'"]
+      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:9092 --list | grep -E '(workflow_run_log|bella_file_api)'" ]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -133,8 +135,8 @@ services:
       - ./infrastructure/minio/scripts:/scripts:ro
     networks:
       - bella-network
-    entrypoint: ["/bin/bash"]
-    command: ["/scripts/init-minio.sh"]
+    entrypoint: [ "/bin/bash" ]
+    command: [ "/scripts/init-minio.sh" ]
 
 volumes:
   mysql-data:
